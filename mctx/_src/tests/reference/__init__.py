@@ -1,0 +1,81 @@
+# Copyright 2021 DeepMind Technologies Limited. All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ==============================================================================
+"""The original mctx (upstream commit 428bfb7), for equivalence tests only.
+
+Each module is a verbatim copy of mctx/_src/<module>.py at that commit, with
+imports pointing here. search_equivalence_test.py runs these policies next to
+the optimised ones and checks the results are bit-identical. Do not change.
+"""
+
+from mctx._src.tests.reference.action_selection import gumbel_muzero_interior_action_selection
+from mctx._src.tests.reference.action_selection import gumbel_muzero_root_action_selection
+from mctx._src.tests.reference.action_selection import GumbelMuZeroExtraData
+from mctx._src.tests.reference.action_selection import muzero_action_selection
+from mctx._src.tests.reference.base import ChanceRecurrentFnOutput
+from mctx._src.tests.reference.base import DecisionRecurrentFnOutput
+from mctx._src.tests.reference.base import InteriorActionSelectionFn
+from mctx._src.tests.reference.base import LoopFn
+from mctx._src.tests.reference.base import PolicyOutput
+from mctx._src.tests.reference.base import RecurrentFn
+from mctx._src.tests.reference.base import RecurrentFnOutput
+from mctx._src.tests.reference.base import RecurrentState
+from mctx._src.tests.reference.base import RootActionSelectionFn
+from mctx._src.tests.reference.base import RootFnOutput
+from mctx._src.tests.reference.policies import gumbel_muzero_policy
+from mctx._src.tests.reference.policies import muzero_policy
+from mctx._src.tests.reference.policies import stochastic_muzero_policy
+from mctx._src.tests.reference.qtransforms import qtransform_by_min_max
+from mctx._src.tests.reference.qtransforms import qtransform_by_parent_and_siblings
+from mctx._src.tests.reference.qtransforms import qtransform_completed_by_mix_value
+from mctx._src.tests.reference.search import search
+from mctx._src.tests.reference.tree import Tree
+
+__version__ = "0.0.71"
+
+__all__ = (
+    "ChanceRecurrentFnOutput",
+    "DecisionRecurrentFnOutput",
+    "GumbelMuZeroExtraData",
+    "InteriorActionSelectionFn",
+    "LoopFn",
+    "PolicyOutput",
+    "RecurrentFn",
+    "RecurrentFnOutput",
+    "RecurrentState",
+    "RootActionSelectionFn",
+    "RootFnOutput",
+    "Tree",
+    "gumbel_muzero_interior_action_selection",
+    "gumbel_muzero_policy",
+    "gumbel_muzero_root_action_selection",
+    "muzero_action_selection",
+    "muzero_policy",
+    "qtransform_by_min_max",
+    "qtransform_by_parent_and_siblings",
+    "qtransform_completed_by_mix_value",
+    "search",
+    "stochastic_muzero_policy",
+)
+
+#  _________________________________________
+# / Please don't use symbols in `_src` they \
+# \ are not part of the Mctx public API.    /
+#  -----------------------------------------
+#         \   ^__^
+#          \  (oo)\_______
+#             (__)\       )\/\
+#                 ||----w |
+#                 ||     ||
+#

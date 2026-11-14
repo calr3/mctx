@@ -25,12 +25,26 @@ and the results are unchanged:
 - With `max_depth >= num_simulations` (the default) every simulation adds node
   `sim + 1` in every batch element, so node writes are slice updates rather
   than scatters.
+- Every node has one parent, so the visits, value, reward and discount of the
+  edge to a node are stored once, on the node (`[B, N]`), instead of in four
+  `[B, N, num_actions]` arrays. `Tree.children_visits`, `children_values`,
+  `children_rewards` and `children_discounts` remain as read-only properties
+  that gather the full arrays; inside a search, `Tree.child_visits(index)`,
+  `Tree.child_prior_logits(index)` and `Tree.qvalues(index)` read one node.
+  `Tree.replace(children_visits=...)` and the like no longer work.
+- `children_index` is stored as int16 when the tree has at most 32767 nodes.
+- Opt-in: `prior_logits_dtype=jnp.bfloat16` (on every policy and on `search`)
+  stores the tree's prior logits in bfloat16, halving the largest remaining
+  array. Reads are upcast to the value dtype, but the stored logits lose
+  precision, so results differ slightly from the default.
 
-`mctx/_src/tests/search_equivalence_test.py` checks that the search tree,
-action and action weights are bit-identical to the original implementation
-(kept as `mctx/_src/tests/reference_search.py`). On CPU, one Gumbel MuZero
-search over 512 Gess positions with 32 simulations took 540 ms instead of
-774 ms, with 20% less temporary memory.
+`mctx/_src/tests/search_equivalence_test.py` runs every policy here and in the
+original implementation, which is kept verbatim as `mctx/_src/tests/reference`,
+and checks that the action, the action weights and every field of the original
+tree are bit-identical, for plain, Gumbel and stochastic MuZero, with and
+without `max_depth`. On CPU, one Gumbel MuZero search over 512 Gess positions
+with 32 simulations took 540 ms instead of 774 ms with the first three changes
+alone, with 20% less temporary memory.
 
 ## Installation
 

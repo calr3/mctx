@@ -14,7 +14,7 @@
 # ==============================================================================
 """Search policies."""
 import functools
-from typing import Optional, Tuple
+from typing import Any, Optional, Tuple
 
 import chex
 import jax
@@ -42,7 +42,8 @@ def muzero_policy(
     dirichlet_alpha: chex.Numeric = 0.3,
     pb_c_init: chex.Numeric = 1.25,
     pb_c_base: chex.Numeric = 19652,
-    temperature: chex.Numeric = 1.0) -> base.PolicyOutput[None]:
+    temperature: chex.Numeric = 1.0,
+    prior_logits_dtype: Optional[Any] = None) -> base.PolicyOutput[None]:
   """Runs MuZero search and returns the `PolicyOutput`.
 
   In the shape descriptions, `B` denotes the batch dimension.
@@ -72,6 +73,9 @@ def muzero_policy(
     pb_c_base: constant c_2 in the PUCT formula.
     temperature: temperature for acting proportionally to
       `visit_counts**(1 / temperature)`.
+    prior_logits_dtype: dtype in which the search tree stores prior logits,
+      e.g. `jnp.bfloat16` to halve its largest array. Defaults to the dtype of
+      `root.prior_logits`. Changes the results slightly; see `search.search`.
 
   Returns:
     `PolicyOutput` containing the proposed action, action_weights and the used
@@ -108,7 +112,8 @@ def muzero_policy(
       num_simulations=num_simulations,
       max_depth=max_depth,
       invalid_actions=invalid_actions,
-      loop_fn=loop_fn)
+      loop_fn=loop_fn,
+      prior_logits_dtype=prior_logits_dtype)
 
   # Sampling the proposed action proportionally to the visit counts.
   summary = search_tree.summary()
@@ -135,6 +140,7 @@ def gumbel_muzero_policy(
     qtransform: base.QTransform = qtransforms.qtransform_completed_by_mix_value,
     max_num_considered_actions: int = 16,
     gumbel_scale: chex.Numeric = 1.,
+    prior_logits_dtype: Optional[Any] = None,
 ) -> base.PolicyOutput[action_selection.GumbelMuZeroExtraData]:
   """Runs Gumbel MuZero search and returns the `PolicyOutput`.
 
@@ -170,6 +176,9 @@ def gumbel_muzero_policy(
       valid actions is smaller.
     gumbel_scale: scale for the Gumbel noise. Evalution on perfect-information
       games can use gumbel_scale=0.0.
+    prior_logits_dtype: dtype in which the search tree stores prior logits,
+      e.g. `jnp.bfloat16` to halve its largest array. Defaults to the dtype of
+      `root.prior_logits`. Changes the results slightly; see `search.search`.
 
   Returns:
     `PolicyOutput` containing the proposed action, action_weights and the used
@@ -205,7 +214,8 @@ def gumbel_muzero_policy(
       max_depth=max_depth,
       invalid_actions=invalid_actions,
       extra_data=extra_data,
-      loop_fn=loop_fn)
+      loop_fn=loop_fn,
+      prior_logits_dtype=prior_logits_dtype)
   summary = search_tree.summary()
 
   # Acting with the best action from the most visited actions.
@@ -247,7 +257,8 @@ def stochastic_muzero_policy(
     dirichlet_alpha: chex.Numeric = 0.3,
     pb_c_init: chex.Numeric = 1.25,
     pb_c_base: chex.Numeric = 19652,
-    temperature: chex.Numeric = 1.0) -> base.PolicyOutput[None]:
+    temperature: chex.Numeric = 1.0,
+    prior_logits_dtype: Optional[Any] = None) -> base.PolicyOutput[None]:
   """Runs Stochastic MuZero search.
 
   Implements search as described in the Stochastic MuZero paper:
@@ -283,6 +294,9 @@ def stochastic_muzero_policy(
     pb_c_base: constant c_2 in the PUCT formula.
     temperature: temperature for acting proportionally to `visit_counts**(1 /
       temperature)`.
+    prior_logits_dtype: dtype in which the search tree stores prior logits,
+      e.g. `jnp.bfloat16` to halve its largest array. Defaults to the dtype of
+      `root.prior_logits`. Changes the results slightly; see `search.search`.
 
   Returns:
     `PolicyOutput` containing the proposed action, action_weights and the used
@@ -360,7 +374,8 @@ def stochastic_muzero_policy(
       num_simulations=num_simulations,
       max_depth=max_depth,
       invalid_actions=invalid_actions,
-      loop_fn=loop_fn)
+      loop_fn=loop_fn,
+      prior_logits_dtype=prior_logits_dtype)
 
   # Sampling the proposed action proportionally to the visit counts.
   search_tree = _mask_tree(search_tree, num_actions, 'decision')
@@ -514,10 +529,6 @@ def _mask_tree(tree: search.Tree, num_actions: int, mode: str) -> search.Tree:
   return tree.replace(  # pyrefly: ignore[missing-attribute]
       children_index=_take_slice(tree.children_index),
       children_prior_logits=_take_slice(tree.children_prior_logits),
-      children_visits=_take_slice(tree.children_visits),
-      children_rewards=_take_slice(tree.children_rewards),
-      children_discounts=_take_slice(tree.children_discounts),
-      children_values=_take_slice(tree.children_values),
       root_invalid_actions=_take_slice(tree.root_invalid_actions))
 
 
@@ -533,9 +544,8 @@ def _make_stochastic_action_selection_fn(
       tree: search.Tree,
       node_index: chex.Array,
   ) -> chex.Array:
-    num_chance = tree.children_visits[node_index]  # pyrefly: ignore[bad-index]
-    # pyrefly: ignore[bad-index]
-    chance_logits = tree.children_prior_logits[node_index]
+    num_chance = tree.child_visits(node_index)
+    chance_logits = tree.child_prior_logits(node_index)
     prob_chance = jax.nn.softmax(chance_logits)
     argmax_chance = jnp.argmax(prob_chance / (num_chance + 1), axis=-1).astype(
         jnp.int32

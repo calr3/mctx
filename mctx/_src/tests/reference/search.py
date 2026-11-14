@@ -12,12 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ==============================================================================
-"""The search loop as it was before the performance changes in search.py.
-
-A verbatim copy of mctx/_src/search.py at upstream commit 428bfb7, kept only so
-search_equivalence_test.py can check that the current search returns exactly
-the same tree. Do not change it.
-"""
+"""A JAX implementation of batched MCTS."""
 import functools
 from typing import Any, NamedTuple, Optional, Tuple, TypeVar
 
@@ -25,9 +20,9 @@ import chex
 import jax
 import jax.numpy as jnp
 
-from mctx._src import action_selection
-from mctx._src import base
-from mctx._src import tree as tree_lib
+from mctx._src.tests.reference import action_selection
+from mctx._src.tests.reference import base
+from mctx._src.tests.reference import tree as tree_lib
 
 Tree = tree_lib.Tree
 T = TypeVar("T")

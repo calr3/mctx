@@ -40,33 +40,35 @@ class Tree(Generic[T]):
   parents: `[B, N]` the node index for the parents for each node.
   action_from_parent: `[B, N]` action to take from the parent to reach each
     node.
+  node_rewards: `[B, N]` the immediate reward of the action from the parent to
+    each node.
+  node_discounts: `[B, N]` the discount between `node_rewards` and
+    `node_values` for each node.
   children_index: `[B, N, num_actions]` the node index of the children for each
-    action.
+    action. int16 when the tree has at most 32767 nodes, else int32.
   children_prior_logits: `[B, N, num_actions]` the action prior logits of each
     node.
-  children_visits: `[B, N, num_actions]` the visit counts for children for
-    each action.
-  children_rewards: `[B, N, num_actions]` the immediate reward for each action.
-  children_discounts: `[B, N, num_actions]` the discount between the
-    `children_rewards` and the `children_values`.
-  children_values: `[B, N, num_actions]` the value of the next node after the
-    action.
   embeddings: `[B, N, ...]` the state embeddings of each node.
   root_invalid_actions: `[B, num_actions]` a mask with invalid actions at the
     root. In the mask, invalid actions have ones, and valid actions have zeros.
   extra_data: `[B, ...]` extra data passed to the search.
+
+  Every node has exactly one parent, so the statistics of the edge to a child
+  are stored once, on the child. `children_visits`, `children_rewards`,
+  `children_discounts` and `children_values` remain available as read-only
+  `[B, N, num_actions]` properties gathered through `children_index` (zero for
+  unexpanded actions), but inside a search use the per-node accessors
+  (`child_visits`, `qvalues`), which gather only the rows they need.
   """
   node_visits: chex.Array  # [B, N]
   raw_values: chex.Array  # [B, N]
   node_values: chex.Array  # [B, N]
   parents: chex.Array  # [B, N]
   action_from_parent: chex.Array  # [B, N]
+  node_rewards: chex.Array  # [B, N]
+  node_discounts: chex.Array  # [B, N]
   children_index: chex.Array  # [B, N, num_actions]
   children_prior_logits: chex.Array  # [B, N, num_actions]
-  children_visits: chex.Array  # [B, N, num_actions]
-  children_rewards: chex.Array  # [B, N, num_actions]
-  children_discounts: chex.Array  # [B, N, num_actions]
-  children_values: chex.Array  # [B, N, num_actions]
   embeddings: Any  # [B, N, ...]
   root_invalid_actions: chex.Array  # [B, num_actions]
   extra_data: T  # [B, ...]
@@ -85,12 +87,47 @@ class Tree(Generic[T]):
   def num_simulations(self):
     return self.node_visits.shape[-1] - 1
 
+  @property
+  def children_visits(self):
+    """`[..., N, num_actions]` visit counts of each node's children."""
+    return _gather_children(self.children_index, self.node_visits)
+
+  @property
+  def children_rewards(self):
+    """`[..., N, num_actions]` immediate reward of each action."""
+    return _gather_children(self.children_index, self.node_rewards)
+
+  @property
+  def children_discounts(self):
+    """`[..., N, num_actions]` discount between reward and child value."""
+    return _gather_children(self.children_index, self.node_discounts)
+
+  @property
+  def children_values(self):
+    """`[..., N, num_actions]` value of the node each action leads to."""
+    return _gather_children(self.children_index, self.node_values)
+
   def qvalues(self, indices):
     """Compute q-values for any node indices in the tree."""
-    if jnp.asarray(indices).shape:
-      return jax.vmap(_unbatched_qvalues)(self, indices)
-    else:
-      return _unbatched_qvalues(self, indices)
+    return _per_node(_unbatched_qvalues, self, indices)
+
+  def child_visits(self, indices):
+    """Visit counts of each action's child, for any node indices in the tree.
+
+    Like `qvalues`: a scalar index on an unbatched tree gives
+    `[num_actions]`, a `[B]` index on a batched tree gives `[B, num_actions]`.
+    Unexpanded actions have zero visits.
+    """
+    return _per_node(_unbatched_child_visits, self, indices)
+
+  def child_prior_logits(self, indices):
+    """Prior logits of each action, for any node indices in the tree.
+
+    Shaped like `child_visits`. The logits may be stored at reduced precision
+    (see `search(prior_logits_dtype=...)`); they are returned upcast to the
+    dtype of the node values, so the arithmetic on them is unaffected.
+    """
+    return _per_node(_unbatched_child_prior_logits, self, indices)
 
   def summary(self) -> SearchSummary:
     """Extract summary statistics for the root node."""
@@ -101,8 +138,7 @@ class Tree(Generic[T]):
     root_indices = jnp.full((batch_size,), Tree.ROOT_INDEX)
     qvalues = self.qvalues(root_indices)
     # Extract visit counts and induced probabilities for the root nodes.
-    # pyrefly: ignore[bad-index]
-    visit_counts = self.children_visits[:, Tree.ROOT_INDEX].astype(value.dtype)
+    visit_counts = self.child_visits(root_indices).astype(value.dtype)
     total_counts = jnp.sum(visit_counts, axis=-1, keepdims=True)
     visit_probs = visit_counts / jnp.maximum(total_counts, 1)
     visit_probs = jnp.where(total_counts > 0, visit_probs, 1 / self.num_actions)
@@ -133,11 +169,53 @@ class SearchSummary:
   qvalues: chex.Array
 
 
-def _unbatched_qvalues(tree: Tree, index: int) -> int:
-  chex.assert_rank(tree.children_discounts, 2)
+def _gather_children(children_index, node_array):
+  """`node_array[children_index]`, zero where the child is unexpanded.
+
+  Args:
+    children_index: `[..., num_actions]` child node indices, possibly
+      `Tree.UNVISITED`; either one node's row or all rows `[..., N, A]`.
+    node_array: `[..., N]` per-node values, with the same leading batch
+      dimensions as `children_index` beyond its own node rows.
+
+  Returns:
+    The children's values, shaped like `children_index`.
+  """
+  if node_array.ndim > 1:
+    return jax.vmap(_gather_children)(children_index, node_array)
+  unvisited = children_index == Tree.UNVISITED
+  # Clip the UNVISITED index (-1) to 0 rather than letting it wrap; the masked
+  # result does not depend on which node it reads.
+  values = jnp.take(node_array, children_index, mode="clip")
+  return jnp.where(unvisited, jnp.zeros((), node_array.dtype), values)
+
+
+def _per_node(fn, tree, indices):
+  if jnp.asarray(indices).shape:
+    return jax.vmap(fn)(tree, indices)
+  else:
+    return fn(tree, indices)
+
+
+def _unbatched_child_visits(tree: Tree, index: int) -> chex.Array:
+  chex.assert_rank(tree.node_visits, 1)
+  return _gather_children(
+      tree.children_index[index],  # pyrefly: ignore[bad-index]
+      tree.node_visits)
+
+
+def _unbatched_child_prior_logits(tree: Tree, index: int) -> chex.Array:
+  chex.assert_rank(tree.node_values, 1)
+  logits = tree.children_prior_logits[index]  # pyrefly: ignore[bad-index]
+  return logits.astype(
+      jnp.promote_types(logits.dtype, tree.node_values.dtype))
+
+
+def _unbatched_qvalues(tree: Tree, index: int) -> chex.Array:
+  chex.assert_rank(tree.node_values, 1)
+  children = tree.children_index[index]  # pyrefly: ignore[bad-index]
   return (
-      # pyrefly: ignore[bad-index, bad-return]
-      tree.children_rewards[index]
-      # pyrefly: ignore[bad-index]
-      + tree.children_discounts[index] * tree.children_values[index]
+      _gather_children(children, tree.node_rewards)
+      + _gather_children(children, tree.node_discounts)
+      * _gather_children(children, tree.node_values)
   )
