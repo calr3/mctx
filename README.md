@@ -42,9 +42,10 @@ and the results are unchanged:
 original implementation, which is kept verbatim as `mctx/_src/tests/reference`,
 and checks that the action, the action weights and every field of the original
 tree are bit-identical, for plain, Gumbel and stochastic MuZero, with and
-without `max_depth`. On CPU, one Gumbel MuZero search over 512 Gess positions
-with 32 simulations took 540 ms instead of 774 ms with the first three changes
-alone, with 20% less temporary memory.
+without `max_depth`. On CPU, one Gumbel MuZero search over 256 Gess positions
+with 32 simulations and a small ResNet took 1435 ms instead of 1838 ms (1.28x),
+with half the temporary memory (58.8 vs 116.6 MiB). Not yet measured on GPU or
+TPU; the bfloat16 option was slower on CPU, where bfloat16 is emulated.
 
 ## Installation
 
