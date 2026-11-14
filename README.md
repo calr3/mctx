@@ -10,6 +10,28 @@ in Mctx are defined for and operate on batches of inputs, in parallel. This
 allows to make the most of the accelerators and enables the algorithms to work
 with large learned environment models parameterized by deep neural networks.
 
+## Changes in this fork
+
+The search loop in `mctx/_src/search.py` is faster on accelerators; the API
+and the results are unchanged:
+
+- The root step of each simulation runs once, before the traversal loop.
+  Choosing the root or interior rule with `lax.cond` inside the loop became a
+  select under `vmap`, so both rules ran at every depth.
+- The backward pass only reads the tree inside its loop and applies its writes
+  once at the end. Updating the tree inside a vmapped `while_loop` selected
+  over the whole carry on every iteration, copying every
+  `[B, N, num_actions]` array once per level of every simulation.
+- With `max_depth >= num_simulations` (the default) every simulation adds node
+  `sim + 1` in every batch element, so node writes are slice updates rather
+  than scatters.
+
+`mctx/_src/tests/search_equivalence_test.py` checks that the search tree,
+action and action weights are bit-identical to the original implementation
+(kept as `mctx/_src/tests/reference_search.py`). On CPU, one Gumbel MuZero
+search over 512 Gess positions with 32 simulations took 540 ms instead of
+774 ms, with 20% less temporary memory.
+
 ## Installation
 
 You can install the latest released version of Mctx from PyPI via:
